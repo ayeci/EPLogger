@@ -230,13 +230,15 @@ graph TD
     end
 
     subgraph Backend[バックエンド処理 Python]
-        Scraper[<strong>scraper.py</strong><br>バッチスクレイパー]
+        Scraper[<strong>scraper.py 等</strong><br>バッチスクレイパー]
         App[<strong>app.py</strong><br>Flaskメインサーバ]
         API[<strong>api.py</strong><br>JSONP Blueprint]
     end
 
     subgraph Storage[ローカルデータ]
+        Temp[(<strong>temp/</strong><br>生データ一時保存)]
         Data[(<strong>static/<br>data.csv & status.json</strong>)]
+        Backup[(<strong>backup/</strong><br>履歴バックアップ)]
     end
 
     subgraph Frontend[フロントエンド ブラウザ]
@@ -244,9 +246,13 @@ graph TD
         Assets[<strong>view.js & style.css<br>Chart.js</strong> / BS5]
     end
 
-    %% スクレイピングのフロー
+    %% スクレイピングとファイル処理のフロー
     KPNet -->|Selenium / 30分毎| Scraper
-    Scraper -->|上書き保存| Data
+    JMA -.->|過去データ取得| Scraper
+
+    Scraper -->|①まずは保存| Temp
+    Temp -->|②整形して配置| Data
+    Temp -.->|③元ファイルを退避| Backup
 
     %% バックエンドのフロー
     Data -->|pandasで読み込み| API
