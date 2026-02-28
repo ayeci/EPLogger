@@ -221,31 +221,46 @@ python get_past_weather.py
 
 ## アーキテクチャ
 
-```
-┌─────────────────────────────────────────────────┐
-│  太陽光発電監視サイト (kp-net.com)               │
-└──────────────┬──────────────────────────────────┘
-               │ Selenium (30分ごと)
-               ▼
-┌──────────────────────┐    ┌──────────────────────┐
-│  scraper.py          │───▶│  static/data.csv     │
-│  (バッチスクレイパー) │    │  static/status.json  │
-└──────────────────────┘    └──────────┬───────────┘
-                                       │ pandas
-                                       ▼
-┌──────────────────────┐    ┌──────────────────────┐
-│  app.py             │◀───│  api.py              │
-│  (Flaskサーバ)       │    │  (JSONP Blueprint)   │
-└──────────┬───────────┘    └──────────────────────┘
-           │ HTTP :5000
-           ▼
-┌──────────────────────┐    ┌──────────────────────┐
-│  index.html           │◀───│  view.js + style.css │
-│  (ダッシュボード)     │    │  (Chart.js / BS5)    │
-└──────────────────────┘    └──────────────────────┘
-           │
-           ├── 気象庁API（週間天気予報）
-           └── Yahoo天気API（降水予測）
+```mermaid
+graph TD
+    subgraph Web[外部Webサイト / API]
+        KPNet((<strong>kp-net.com</strong><br>太陽光監視サイト))
+        JMA((<strong>気象庁API</strong><br>週間天気予報<br>過去1か月の気象データ))
+        Yahoo((<strong>Yahoo気象情報API</strong><br>2時間後までの降水予測))
+    end
+
+    subgraph Backend[バックエンド処理 Python]
+        Scraper[<strong>scraper.py</strong><br>バッチスクレイパー]
+        App[<strong>app.py</strong><br>Flaskメインサーバ]
+        API[<strong>api.py</strong><br>JSONP Blueprint]
+    end
+
+    subgraph Storage[ローカルデータ]
+        Data[(<strong>static/<br>data.csv & status.json</strong>)]
+    end
+
+    subgraph Frontend[フロントエンド ブラウザ]
+        HTML[<strong>index.html</strong><br>ダッシュボード]
+        Assets[<strong>view.js & style.css<br>Chart.js</strong> / BS5]
+    end
+
+    %% スクレイピングのフロー
+    KPNet -->|Selenium / 30分毎| Scraper
+    Scraper -->|上書き保存| Data
+
+    %% バックエンドのフロー
+    Data -->|pandasで読み込み| API
+    Data -->|pandasで読み込み| App
+    API -.->|Blueprint登録| App
+
+    %% 天気APIのフロー
+    JMA -->|リクエスト| App
+    Yahoo -->|リクエスト| App
+
+    %% 画面表示のフロー
+    App ===>|HTTP| HTML
+    API -.->|JSONP非同期通信| HTML
+    Assets -.->|デザイン・グラフ描画| HTML
 ```
 
 ## ダッシュボード表示内容
