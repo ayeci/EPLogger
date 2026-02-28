@@ -1,0 +1,70 @@
+# === EPLogger Specific ===
+# 実行時に生成される動的データファイル群
+data.csv
+status.json
+temp_data*.json
+temp.html
+past_weather_error.txt
+static/past_weather.csv
+
+# バックアップ・テンポラリディレクトリ
+backup/
+temp/
+
+# 環境変数 (認証情報)
+.env
+
+# === Python / Environment ===
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+pyvenv.cfg
+Include/
+Lib/
+Scripts/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

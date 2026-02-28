@@ -1,0 +1,197 @@
+:root {
+    --color-gen: #97c305;
+    --color-con: #f4b200;
+    --color-sel: #c687d9;
+    --color-buy: #ff6c00;
+    --color-char: #0a87c9;
+    --color-dis: #a77a00;
+    --color-bat: #34aa55;
+}
+
+body {
+    font-family: 'Outfit', 'Noto Sans JP', sans-serif;
+    background-color: #f8f9fa;
+    color: #2d3436;
+    padding-top: 70px;
+}
+
+.card {
+    border: none;
+    border-radius: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+    transition: transform 0.2s ease;
+    background: white;
+}
+
+.stat-card {
+    padding: 0.75rem 1rem;
+    height: 100%;
+}
+
+.stat-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-unit {
+    font-size: 0.8rem;
+    color: #636e72;
+    margin-left: 4px;
+    font-weight: 400;
+}
+
+.chart-container {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 320px;
+}
+
+.badge-battery {
+    font-size: 1.25rem;
+    padding: 4px 8px;
+    border-radius: 50px;
+    font-weight: 600;
+    display: inline-block;
+    vertical-align: middle;
+    text-align: center;
+    margin: auto;
+}
+
+
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.6s ease forwards;
+}
+
+.bg-gradient-primary {
+    background: linear-gradient(135deg, var(--color-char), #08699c);
+}
+
+.stat-card.gen {
+    border-left: 4px solid var(--color-gen);
+}
+
+.stat-card.gen .stat-label i,
+.stat-card.gen .stat-value {
+    color: var(--color-gen);
+}
+
+.stat-card.con {
+    border-left: 4px solid var(--color-con);
+}
+
+.stat-card.con .stat-label i,
+.stat-card.con .stat-value {
+    color: var(--color-con);
+}
+
+.stat-card.sel {
+    border-left: 4px solid var(--color-sel);
+}
+
+.stat-card.sel .stat-label i,
+.stat-card.sel .stat-value {
+    color: var(--color-sel);
+}
+
+.stat-card.buy {
+    border-left: 4px solid var(--color-buy);
+}
+
+.stat-card.buy .stat-label i,
+.stat-card.buy .stat-value {
+    color: var(--color-buy);
+}
+
+.stat-card.bat {
+    border-left: 4px solid var(--color-bat);
+}
+
+.text-char {
+    color: var(--color-char);
+}
+
+.text-dis {
+    color: var(--color-dis);
+}
+
+.icon-stack {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-stack-overlay {
+    position: absolute;
+    bottom: -4px;
+    right: -4px;
+    font-size: 0.5em;
+    /* 元のアイコンの半分サイズ程度 */
+    background-color: white;
+    /* 透過を防ぐための背景指定 */
+    border-radius: 50%;
+}
+
+.history-table-container {
+    max-height: 500px;
+}
+
+/* Horizontal Scroll Inner Shadows */
+.scroll-shadows {
+    /* 
+      1. 左カバー (白), 右カバー (白)
+      2. 左影 (黒半透過), 右影 (黒半透過) 
+    */
+    background:
+        linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)),
+        linear-gradient(to right, rgba(255, 255, 255, 0), white 70%) 100% 0,
+        radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0)),
+        radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0)) 100% 0;
+
+    background-repeat: no-repeat;
+    background-color: transparent;
+
+    /* カバーのサイズと影のサイズ */
+    background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+
+    /* 
+      カバーは local (スクロールと一緒に動くため端に着くと影を隠す)
+      影は scroll (要素に固定されるため常に表示されるが、カバーの下に隠れる)
+    */
+    background-attachment: local, local, scroll, scroll;
+}
+
+/* Weather UI Helpers */
+.weather-card {
+    min-width: 80px;
+    flex: 0 0 auto;
+}
+
+.weather-time {
+    font-size: 0.8rem;
+}
+
+.weather-unit {
+    font-size: 0.7em;
+}
+
+.jma-forecast-card-temp {
+    font-size: 0.8rem;
+    white-space: nowrap;
+}

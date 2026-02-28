@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EPMonitor</title>
+    <!-- Bootstrap 5, Icons, Google Fonts -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Noto+Sans+JP:wght@400;700&display=swap"
+        rel="stylesheet">
+
+    <!-- External Style -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+</head>
+
+<body>
+    <!-- 固定ヘッダー (ステータスバー) -->
+    <nav class="navbar fixed-top py-2" style="background:rgba(255,255,255,.75)">
+        <div class="container-fluid px-4">
+            <h1>
+                <a class="navbar-brand d-flex align-items-center gap-2" href="#">
+                    <i class="bi bi-brightness-high-fill text-primary"></i>
+                    <span class="fw-bold text-dark">EPMonitor</span>
+                </a>
+            </h1>
+            <div class="d-flex align-items-center gap-3 d-none d-md-flex">
+                <div class="text-end me-3">
+                    <div class="text-muted small">最終更新: <span class="fw-bold">{{ last_update }}</span></div>
+                    <div class="text-muted small text-opacity-75">次回予定: {{ next_reload }}</div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container-fluid px-4">
+        <!-- 天気情報セクション -->
+        <aside style="grid-template-columns: 1fr 3fr;" class="d-grid gap-4 mb-2 animate-fade-in">
+            <!-- 気象庁API (週間天気予報) -->
+            {% if jma_weather %}
+            <section style="min-width: 0;">
+                <h6 class="fw-bold d-flex align-items-center gap-2 mb-2"><i class="bi bi-cloud-sun text-primary"></i>
+                    週間天気予報 (東京)</h6>
+                <div class="d-flex flex-nowrap overflow-auto gap-1 pb-2 scroll-shadows">
+                    {% for jma in jma_weather %}
+                    <div class="card text-center p-2 weather-card bg-light">
+                        <small class="text-muted fw-bold text-nowrap">{{ jma.day }}</small>
+                        <div class="fs-4 my-1 {{ jma.color }}">
+                            <i class="bi {{ jma.icon }}"></i>
+                        </div>
+                        <div class="jma-forecast-card-temp">
+                            <span class="text-danger fw-bold">{{ jma.temp_max
+                                }}</span><span class="text-muted mx-1">/</span><span class="text-primary fw-bold">{{
+                                jma.temp_min }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+
+            <!-- Yahoo! 天気API (降水予測) -->
+            {% if weather_data %}
+            <section style="min-width: 0;">
+                <h6 class="fw-bold d-flex align-items-center gap-2 mb-2"><i class="bi bi-droplet-half text-primary"></i>
+                    2時間以内の天気と降水予測</h6>
+                <div class="d-flex flex-nowrap overflow-auto gap-1 pb-2 scroll-shadows">
+                    {% for w in weather_data %}
+                    <div
+                        class="card text-center p-2 weather-card {% if w.is_rain %}bg-info-subtle border-info{% else %}bg-light{% endif %}">
+                        <small class="text-muted weather-time">{{ w.time }}</small>
+                        <div class="fs-4 my-1">
+                            {% if w.is_rain %}
+                            <i class="bi bi-cloud-rain-fill text-primary"></i>
+                            {% else %}
+                            <i class="bi bi-sun-fill text-warning"></i>
+                            {% endif %}
+                        </div>
+                        <small class="fw-bold">{{ w.rainfall }}<span class="text-muted fw-normal weather-unit">
+                                mm</span></small>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+        </aside>
+
+        <!-- 本日累計 -->
+        <article style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr;" class="d-grid gap-2 mb-2 animate-fade-in">
+            <!-- 発電 -->
+            <section class="card stat-card gen d-flex flex-row justify-content-between align-items-center py-2 px-3">
+                <h6 class="stat-label small fw-semibold text-secondary mb-0 d-flex align-items-center gap-1"><i
+                        class="bi bi-sun-fill"></i> 今日の発電累計</h6>
+                <div class="stat-value">{{ today.gen }}<span class="stat-unit">kWh</span></div>
+            </section>
+            <!-- 消費 -->
+            <section class="card stat-card con d-flex flex-row justify-content-between align-items-center py-2 px-3">
+                <h6 class="stat-label small fw-semibold text-secondary mb-0 d-flex align-items-center gap-1"><i
+                        class="bi bi-house-down"></i> 今日の消費累計</h6>
+                <div class="stat-value">{{ today.con }}<span class="stat-unit">kWh</span></div>
+            </section>
+            <!-- 売電 -->
+            <section class="card stat-card sel d-flex flex-row justify-content-between align-items-center py-2 px-3">
+                <h6 class="stat-label small fw-semibold text-secondary mb-0 d-flex align-items-center gap-1"><i
+                        class="bi bi-arrow-up-right-circle-fill"></i> 今日の売電累計</h6>
+                <div class="stat-value">{{ today.sel }}<span class="stat-unit">kWh</span></div>
+            </section>
+            <!-- 買電 -->
+            <section class="card stat-card buy d-flex flex-row justify-content-between align-items-center py-2 px-3">
+                <h6 class="stat-label small fw-semibold text-secondary mb-0 d-flex align-items-center gap-1"><i
+                        class="bi bi-arrow-down-left-circle-fill"></i> 今日の買電累計</h6>
+                <div class="stat-value">{{ today.buy }}<span class="stat-unit">kWh</span></div>
+            </section>
+            <!-- 充電 -->
+            <section
+                class="d-flex flex-row justify-content-between align-items-center gap-2 card stat-card px-3 py-2 bat">
+                <div class="badge-battery {{ bat_status_color }} d-flex flex-row align-items-center gap-2 m-0 fs-6">
+                    <span class="icon-stack align-self-center">
+                        <i class="bi bi-lightning-charge-fill"></i>
+                        {% if bat_status_overlay %}
+                        <i class="bi {{ bat_status_overlay }} icon-stack-overlay"></i>
+                        {% endif %}
+                    </span>
+                    <span class="fw-bold">{{ battery_status }}</span>
+                </div>
+                <div class="badge-battery {{ bat_charge_color }} d-flex flex-row align-items-center gap-2 m-0 fs-5">
+                    <span><i class="bi {{ bat_charge_icon }}"></i></span>
+                    <span class="stat-value">{{ battery_charge }}</span>
+                </div>
+            </section>
+        </article>
+
+        <article style="grid-template-columns: 1.25fr 0.75fr;" class="d-grid gap-4 mb-2">
+            <!-- 直近24時間 -->
+            <section class="p-2 animate-fade-in card p-3 h-100">
+                <h6 class="fw-bold d-flex align-items-center gap-2 mb-2"><i
+                        class="bi bi-clock-history text-primary"></i> 直近 24 時間</h6>
+                <div class="chart-container">
+                    <canvas id="chart24h"></canvas>
+                </div>
+            </section>
+            <!-- 1週間累計 -->
+            <section class="p-2 animate-fade-in card p-3 h-100">
+                <h6 class="fw-bold d-flex align-items-center gap-2 mb-2"><i class="bi bi-calendar3 text-primary"></i>
+                    週間累計</h6>
+                <div class="chart-container">
+                    <canvas id="dailyChart"></canvas>
+                </div>
+            </section>
+        </article>
+
+        <!-- 全期間グラフ -->
+        <article class="row mb-2 animate-fade-in">
+            <section class="card p-3">
+                <h6 class="fw-bold d-flex align-items-center gap-2 mb-2"><i class="bi bi-activity text-primary"></i>
+                    全期間モニタリング（最大1か月間）</h6>
+                <div class="chart-container">
+                    <canvas id="powerChart"></canvas>
+                </div>
+            </section>
+        </article>
+
+        <!-- データテーブル -->
+        <aside class="row mb-2 animate-fade-in">
+            <header class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="fw-bold d-flex align-items-center gap-2 m-0"><i class="bi bi-table text-primary"></i>
+                    履歴データ</h6>
+                <button class="btn btn-outline-primary rounded-pill btn-sm px-3 shadow-sm" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#tableSection">
+                    詳細を表示
+                </button>
+            </header>
+            <section class="collapse" id="tableSection">
+                <div class="card p-3 shadow-sm overflow-hidden border">
+                    <div class="table-responsive history-table-container">
+                        {{ table|safe }}
+                    </div>
+                </div>
+            </section>
+        </aside>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='view.js') }}?v=7"></script>
+</body>
+
+</html>
