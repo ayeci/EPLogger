@@ -195,3 +195,57 @@ body {
     font-size: 0.8rem;
     white-space: nowrap;
 }
+
+/* ===== グリッドレイアウト（デスクトップ） ===== */
+.grid-weather {
+    grid-template-columns: 1fr 3fr;
+}
+
+.grid-stats {
+    grid-template-columns: 0.5fr 1fr 1fr 1fr 1fr 0.75fr;
+}
+
+.grid-charts {
+    grid-template-columns: 1.25fr 0.75fr;
+}
+
+/* ===== モバイル対応 ===== */
+@media (max-width: 1200px) {
+    body {
+        padding-top: 56px;
+    }
+
+    main.container-fluid {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+    }
+
+    /* 天気セクション: 1行1セクション（縦積み） */
+    .grid-weather {
+        grid-template-columns: 1fr;
+    }
+
+    /* 本日累計: 2列×2行 */
+    .grid-stats {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .stat-value {
+        font-size: 1.1rem;
+    }
+
+    /* グラフセクション: すべて縦積み */
+    .grid-charts {
+        grid-template-columns: 1fr;
+    }
+
+    .chart-container {
+        min-height: 240px;
+    }
+
+    /* 履歴テーブル: 縦横スクロール */
+    .history-table-container {
+        max-height: 400px;
+        overflow: auto;
+    }
+}
