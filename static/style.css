@@ -60,6 +60,11 @@ body {
     margin: auto;
 }
 
+.rotate-90 {
+    transform: rotate(90deg);
+    display: inline-block;
+}
+
 
 
 @keyframes fadeIn {
@@ -199,6 +204,10 @@ body {
 /* ===== グリッドレイアウト（デスクトップ） ===== */
 .grid-weather {
     grid-template-columns: 1fr 3fr;
+}
+
+.grid-weather>section {
+    min-width: 0;
 }
 
 .grid-stats {

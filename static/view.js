@@ -183,7 +183,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // --- "00:00" の位置に縦線を引くためのカスタムプラグイン ---
         const verticalLinePlugin = {
             id: 'verticalLinePlugin',
-            afterDraw: chart => {
+            beforeDatasetsDraw: chart => {
                 const ctx = chart.ctx;
                 const xAxis = chart.scales.x;
                 const yAxis = chart.scales.y;
@@ -219,7 +219,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // --- 週間累計グラフの日付の間に縦線を引くプラグイン ---
         const dailyVerticalLinePlugin = {
             id: 'dailyVerticalLinePlugin',
-            afterDraw: chart => {
+            beforeDatasetsDraw: chart => {
                 const ctx = chart.ctx;
                 const xAxis = chart.scales.x;
                 const yAxis = chart.scales.y;

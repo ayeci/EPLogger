@@ -13,6 +13,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Noto+Sans+JP:wght@400;700&display=swap"
         rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
 
     <!-- External Style -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -45,10 +46,10 @@
         <aside class="d-grid gap-4 mb-2 animate-fade-in grid-weather">
             <!-- 気象庁API (週間天気予報) -->
             {% if jma_weather %}
-            <section style="min-width: 0;">
+            <section>
                 <h6 class="fw-bold d-flex align-items-center gap-2 mb-2"><i class="bi bi-cloud-sun text-primary"></i>
                     週間天気予報 (東京)</h6>
-                <div class="d-flex flex-nowrap overflow-auto gap-1 pb-2 scroll-shadows">
+                <div class="d-flex flex-nowrap overflow-auto gap-1 pb-2">
                     {% for jma in jma_weather %}
                     <div class="card text-center p-2 weather-card bg-light">
                         <small class="text-muted fw-bold text-nowrap">{{ jma.day }}</small>
@@ -68,10 +69,10 @@
 
             <!-- Yahoo! 天気API (降水予測) -->
             {% if weather_data %}
-            <section style="min-width: 0;">
+            <section>
                 <h6 class="fw-bold d-flex align-items-center gap-2 mb-2"><i class="bi bi-droplet-half text-primary"></i>
                     2時間以内の天気と降水予測</h6>
-                <div class="d-flex flex-nowrap overflow-auto gap-1 pb-2 scroll-shadows">
+                <div class="d-flex flex-nowrap overflow-auto gap-1 pb-2">
                     {% for w in weather_data %}
                     <div
                         class="card text-center p-2 weather-card {% if w.is_rain %}bg-info-subtle border-info{% else %}bg-light{% endif %}">
@@ -125,16 +126,11 @@
             <section
                 class="d-flex flex-row justify-content-between align-items-center gap-2 card stat-card px-3 py-2 bat">
                 <div class="badge-battery {{ bat_status_color }} d-flex flex-row align-items-center gap-2 m-0 fs-6">
-                    <span class="icon-stack align-self-center">
-                        <i class="bi bi-lightning-charge-fill"></i>
-                        {% if bat_status_overlay %}
-                        <i class="bi {{ bat_status_overlay }} icon-stack-overlay"></i>
-                        {% endif %}
-                    </span>
+                    <span class="material-symbols-outlined">{{ bat_status_icon }}</span>
                     <span class="fw-bold">{{ battery_status }}</span>
                 </div>
                 <div class="badge-battery {{ bat_charge_color }} d-flex flex-row align-items-center gap-2 m-0 fs-5">
-                    <span><i class="bi {{ bat_charge_icon }}"></i></span>
+                    <span class="material-symbols-outlined rotate-90">{{ bat_charge_icon }}</span>
                     <span class="stat-value">{{ battery_charge }}</span>
                 </div>
             </section>
