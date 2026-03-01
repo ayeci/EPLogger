@@ -15,6 +15,9 @@ import os
 import shutil
 from datetime import datetime
 import calendar
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- ログ設定 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -60,7 +63,9 @@ def download_jma_data():
         list: [ステータスコード (int), ファイルパス (str)] のリスト。
               トップページへのアクセスに失敗した場合は None を返す。
     """
-    url_top = "https://www.data.jma.go.jp/risk/obsdl/index.php"
+
+    url_menu = "https://www.data.jma.go.jp/risk/obsdl/"
+    url_init = "https://www.data.jma.go.jp/risk/obsdl/index.php"
     url_download = "https://www.data.jma.go.jp/risk/obsdl/show/table"
 
     # セッションを維持する
@@ -68,15 +73,30 @@ def download_jma_data():
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": url_top 
+        "Referer": url_menu 
     }
 
-    logger.info("気象庁のトップページにアクセスしてセッション(Cookie)を取得します...")
+    logger.info("気象庁のメニューページにアクセスしてセッション(Cookie)を取得します...")
     try:
-        session.get(url_top, headers=headers, timeout=10)
+        # リダイレクトを追跡せずにステータスコードを確認
+        res = session.get(url_menu, headers=headers, timeout=10, allow_redirects=False)
+        
+        # 300系のステータスコード（リダイレクト）が返った場合は index.php にアクセス
+        if 300 <= res.status_code < 400:
+            logger.info(f"リダイレクト({res.status_code})を検出しました。index.php にアクセスします...")
+            # index.phpへのアクセスのためにRefererとURLを更新
+            headers["Referer"] = url_menu
+            session.get(url_init, headers=headers, timeout=10)
+            
+            # データ取得POSTに向けたRefererの更新
+            headers["Referer"] = url_init
+        else:
+            logger.info(f"ステータスコード {res.status_code} を受信。セッション取得完了。")
+            headers["Referer"] = url_menu
+            
     except requests.exceptions.RequestException as e:
-        logger.error(f"トップページへのアクセスに失敗しました: {e}")
-        return [-1, ""]
+        logger.error(f"セッション取得に失敗しました: {e}")
+        return [False, ""]
 
     # payloadはサニタイズ不要！そのままのダブルクォートで渡します
     JMA_STATION_NUM = os.environ.get("JMA_STATION_NUM")
@@ -104,7 +124,7 @@ def download_jma_data():
         response = session.post(url_download, data=payload, headers=headers, timeout=20)
     except requests.exceptions.RequestException as e:
         logger.error(f"データのダウンロードリクエストに失敗しました: {e}")
-        return [-1, ""]
+        return [False, ""]
     
     today = datetime.now().strftime('%Y%m%d%H%M%S')
 
@@ -114,19 +134,22 @@ def download_jma_data():
     # レスポンスのチェック
     status_code = response.status_code
     content_type = response.headers.get("Content-Type", "")
-    if status_code == 200:
+    # 成功失敗の判定はContent-Typeがtext/htmlかどうかで判定
+    [is_success, ext] = [False, "html"] if "text/html" in content_type else [True, "csv"]
+    
+    if is_success:
         logger.info("リクエスト成功")
-        filepath = os.path.join(save_dir, f"pw_{today}.csv")
+        filepath = os.path.join(save_dir, f"pw_{today}.{ext}")
     else:
         logger.error("リクエスト失敗")
-        filepath = os.path.join(save_dir, f"pw_{today}_error.html")
+        filepath = os.path.join(save_dir, f"pw_{today}_error.{ext}")
     
     logger.error(f"Status: {status_code}. Content-Type: {content_type}")
 
     with open(filepath, "wb") as f:
         f.write(response.content)
     logger.info(f"レスポンスを '{filepath}' に保存しました。")
-    return [status_code, filepath]
+    return [is_success, filepath]
 
 def convert_response(filepath_raw):
     """
@@ -166,7 +189,7 @@ def convert_response(filepath_raw):
     except Exception as e:
         logger.error(f"PandasでのCSVパース中にエラーが発生しました: {e}")
     
-    # バックアップ処理
+def backup(filepath_raw):
     try:
         backup_dir = "backup"
         os.makedirs(backup_dir, exist_ok=True)
@@ -181,6 +204,9 @@ def convert_response(filepath_raw):
         logger.error(f"バックアップ中にエラーが発生しました: {e}")
 
 if __name__ == "__main__":
-    [status_code, filepath] = download_jma_data()
-    if status_code == 200:
+    [is_success, filepath] = download_jma_data()
+
+    if is_success:
         convert_response(filepath)
+
+    backup(filepath)

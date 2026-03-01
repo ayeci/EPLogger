@@ -68,3 +68,6 @@ Scripts/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# === Testing / Internal ===
+test_*.py
