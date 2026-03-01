@@ -224,6 +224,7 @@ def index():
     戻り値:
         str: レンダリングされたHTML文字列
     """
+
     current_month = datetime.now().strftime('%Y-%m')
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -261,21 +262,31 @@ def index():
             # 充放電のアイコン・色判定
             if "充電" in battery_status:
                 bat_status_color = "text-char"
-                bat_status_overlay = "bi-plus-circle-fill"
+                bat_status_icon = "bolt"
             elif "放電" in battery_status:
                 bat_status_color = "text-dis"
-                bat_status_overlay = "bi-dash-circle-fill"
+                bat_status_icon = "offline_bolt"
                 
-            # 電池残量のパーセントアイコン・色判定
+            # 電池残量のパーセントアイコン・色判定 (Material Symbols)
             if battery_charge.endswith("%"):
                 try:
                     pct = int(battery_charge.replace("%", "").strip())
-                    if pct >= 80:
-                        bat_charge_icon = "bi-battery-full"
-                    elif pct >= 20:
-                        bat_charge_icon = "bi-battery-half"
+                    if pct > 90:
+                        bat_charge_icon = "battery_full"
+                    elif pct > 75:
+                        bat_charge_icon = "battery_6_bar"
+                    elif pct > 60:
+                        bat_charge_icon = "battery_5_bar"
+                    elif pct > 45:
+                        bat_charge_icon = "battery_4_bar"
+                    elif pct > 30:
+                        bat_charge_icon = "battery_3_bar"
+                    elif pct > 15:
+                        bat_charge_icon = "battery_2_bar"
+                    elif pct > 0:
+                        bat_charge_icon = "battery_1_bar"
                     else:
-                        bat_charge_icon = "bi-battery"
+                        bat_charge_icon = "battery_0_bar"
                         bat_charge_color = "text-danger"
                 except ValueError:
                     pass
@@ -318,7 +329,7 @@ def index():
          table=html_table, row_count=len(df),
          last_update=last_update_str, next_reload=next_reload_str,
          battery_status=battery_status, battery_charge=battery_charge,
-         bat_status_color=bat_status_color, bat_status_overlay=bat_status_overlay,
+         bat_status_color=bat_status_color, bat_status_icon=bat_status_icon,
          bat_charge_color=bat_charge_color, bat_charge_icon=bat_charge_icon,
          today=today_data, weather_data=weather_data, jma_weather=jma_weather)
 
