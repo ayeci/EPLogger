@@ -71,7 +71,6 @@ PUBLIC_DIR = os.path.join(BASE_DIR, "static")   # Web公開フォルダ
 PUBLIC_CSV = os.path.join(PUBLIC_DIR, "data.csv")
 STATUS_JSON = os.path.join(PUBLIC_DIR, "status.json")
 
-MAX_DATA_ROWS = 1440  # data.csv に保持するデータ行数の上限
 DOWNLOAD_TIMEOUT = 30  # ダウンロード待機のタイムアウト（秒）
 
 # --- フォルダ作成 ---
@@ -146,8 +145,7 @@ def merge_csv(downloaded_file):
         1. 元ファイルをBACKUP_DIRにバックアップ
         2. data.csv が存在しなければ新規作成
         3. data.csv が存在すれば末尾行の先頭20文字をアンカーに差分マージ
-        4. データ行を MAX_DATA_ROWS 行に制限（古いデータを自動削除）
-        5. ダウンロードファイルを削除
+        4. ダウンロードファイルを削除
 
     Args:
         downloaded_file (str): マージ対象のCSVファイルパス。
@@ -210,22 +208,6 @@ def merge_csv(downloaded_file):
     else:
         # append_start がファイル末尾 → 新規データなし
         logger.info("新規データはありません")
-
-    # --- データ行を MAX_DATA_ROWS 行に制限 ---
-    with open(PUBLIC_CSV, 'r', encoding=CSV_ENCODING) as f:
-        all_lines = f.readlines()
-
-    # ヘッダー（1行目）＋ データ行
-    header = all_lines[0]
-    data_lines = all_lines[1:]
-
-    if len(data_lines) > MAX_DATA_ROWS:
-        trimmed = data_lines[-MAX_DATA_ROWS:]  # 末尾 MAX_DATA_ROWS 行だけ残す
-        with open(PUBLIC_CSV, 'w', encoding=CSV_ENCODING) as f:
-            f.write(header)
-            f.writelines(trimmed)
-        logger.info("データ行を %d 行 → %d 行にトリミングしました",
-                     len(data_lines), MAX_DATA_ROWS)
 
     # --- ダウンロードファイルを削除 ---
     os.remove(downloaded_file)

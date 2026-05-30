@@ -155,11 +155,23 @@
             </section>
         </article>
 
-        <!-- 全期間グラフ -->
+        <!-- モニタリンググラフ（タブ切り替え） -->
         <article class="row mb-2 animate-fade-in">
             <section class="card p-3">
-                <h6 class="fw-bold d-flex align-items-center gap-2 mb-2"><i class="bi bi-activity text-primary"></i>
-                    30日間モニタリング</h6>
+                <ul class="nav nav-tabs mb-3" id="monitoringTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active fw-bold d-flex align-items-center gap-2"
+                                id="tab-30d-btn" data-range="30d" type="button">
+                            <i class="bi bi-activity text-primary"></i> 30日間モニタリング
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link fw-bold d-flex align-items-center gap-2"
+                                id="tab-all-btn" data-range="all" type="button">
+                            <i class="bi bi-calendar-range text-primary"></i> 全件モニタリング
+                        </button>
+                    </li>
+                </ul>
                 <div class="chart-container">
                     <canvas id="powerChart"></canvas>
                 </div>

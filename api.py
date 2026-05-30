@@ -57,6 +57,19 @@ def view_data():
     col_date = df.columns[0]
     col_time = df.columns[1]
 
+    # --- since / until による日付絞り込み ---
+    # yyyyMMdd 形式で受け取り、未指定の場合はその端を開放
+    since_str = request.args.get('since')  # e.g. '20260101'
+    until_str = request.args.get('until')  # e.g. '20260524'
+    if since_str or until_str:
+        df_dates = pd.to_datetime(df[col_date], format='%Y/%m/%d')
+        mask = pd.Series(True, index=df.index)
+        if since_str:
+            mask &= df_dates >= pd.to_datetime(since_str, format='%Y%m%d')
+        if until_str:
+            mask &= df_dates <= pd.to_datetime(until_str, format='%Y%m%d')
+        df = df[mask].reset_index(drop=True)
+
     def _fmt_label(date_str, time_str):
         """
         日付と時刻の文字列を 'MM/DD HH:MM' 形式のX軸ラベルに整形する。
