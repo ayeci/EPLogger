@@ -178,6 +178,58 @@
             </section>
         </article>
 
+        <!-- 分析: 経済効果 & 蓄電池運用 -->
+        <article class="row mb-2 animate-fade-in">
+            <section class="card p-3">
+                <h6 class="fw-bold d-flex align-items-center gap-2 mb-3">
+                    <i class="bi bi-graph-up-arrow text-primary"></i> 経済効果・蓄電池運用の分析
+                </h6>
+
+                <!-- サマリー統計（4枚） -->
+                <div class="d-grid gap-2 mb-3 grid-analysis-stats">
+                    <section class="card stat-card sel d-flex flex-column justify-content-center py-2 px-3">
+                        <h6 class="stat-label small fw-semibold text-secondary mb-1 d-flex align-items-center gap-1">
+                            <i class="bi bi-arrow-up-right-circle-fill"></i> 売電収入（累計）</h6>
+                        <div class="stat-value" id="sumSellIncome">--<span class="stat-unit">円</span></div>
+                    </section>
+                    <section class="card stat-card buy d-flex flex-column justify-content-center py-2 px-3">
+                        <h6 class="stat-label small fw-semibold text-secondary mb-1 d-flex align-items-center gap-1">
+                            <i class="bi bi-arrow-down-left-circle-fill"></i> 買電支出（累計）</h6>
+                        <div class="stat-value" id="sumBuyCost">--<span class="stat-unit">円</span></div>
+                    </section>
+                    <section class="card stat-card gen d-flex flex-column justify-content-center py-2 px-3">
+                        <h6 class="stat-label small fw-semibold text-secondary mb-1 d-flex align-items-center gap-1">
+                            <i class="bi bi-piggy-bank-fill"></i> 導入メリット（累計）</h6>
+                        <div class="stat-value" id="sumMerit">--<span class="stat-unit">円</span></div>
+                    </section>
+                    <section class="card stat-card bat d-flex flex-column justify-content-center py-2 px-3">
+                        <h6 class="stat-label small fw-semibold text-secondary mb-1 d-flex align-items-center gap-1">
+                            <i class="bi bi-battery-charging"></i> 満充電 / 完全放電</h6>
+                        <div class="stat-value" id="sumBattery">--<span class="stat-unit">日 / 全期間</span></div>
+                    </section>
+                </div>
+
+                <!-- グラフ2枚（経済効果・蓄電池の一日の弧） -->
+                <div class="d-grid gap-4 grid-charts">
+                    <section class="p-2 card p-3 h-100">
+                        <h6 class="fw-bold d-flex align-items-center gap-2 mb-2">
+                            <i class="bi bi-cash-stack text-primary"></i> 月次の経済効果（実収支 と 導入メリット）</h6>
+                        <div class="chart-container">
+                            <canvas id="econChart"></canvas>
+                        </div>
+                        <p class="text-muted small mb-0 mt-2" id="rateNote"></p>
+                    </section>
+                    <section class="p-2 card p-3 h-100">
+                        <h6 class="fw-bold d-flex align-items-center gap-2 mb-2">
+                            <i class="bi bi-battery-half text-primary"></i> 蓄電池の一日（時間帯別 充放電・SOC）</h6>
+                        <div class="chart-container">
+                            <canvas id="batteryChart"></canvas>
+                        </div>
+                    </section>
+                </div>
+            </section>
+        </article>
+
         <!-- データテーブル -->
         <aside class="row mb-2 animate-fade-in">
             <header class="d-flex justify-content-between align-items-center mb-3">

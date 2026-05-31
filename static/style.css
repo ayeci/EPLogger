@@ -258,3 +258,22 @@ body {
         overflow: auto;
     }
 }
+
+/* 分析セクション: サマリー統計のグリッド（デスクトップは4列） */
+.grid-analysis-stats {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+}
+
+/* stat-value 内で縦並びにしたときの単位表記の改行・余白調整 */
+.grid-analysis-stats .stat-value .stat-unit {
+    display: inline-block;
+    margin-left: 4px;
+}
+
+/* ===== モバイル対応（既存の @media (max-width: 1200px) と同じブレークポイント） ===== */
+@media (max-width: 1200px) {
+    /* 分析サマリー: 2列×2行 */
+    .grid-analysis-stats {
+        grid-template-columns: 1fr 1fr;
+    }
+}

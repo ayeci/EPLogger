@@ -370,6 +370,185 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    // --- 分析（経済効果・蓄電池運用）データの取得と描画 ---
+
+    /**
+     * 数値を「12,345」形式のカンマ区切り文字列に整形する。
+     * @param {number} n
+     * @returns {string}
+     */
+    function formatYen(n) {
+        return (n < 0 ? '−' : '') + Math.abs(n).toLocaleString('ja-JP');
+    }
+
+    /**
+     * api_analysis.py から分析データを JSONP で取得する。
+     * @param {Function} onComplete - レスポンスデータを受け取るコールバック
+     */
+    function fetchAnalysisData(onComplete) {
+        const cbName = 'analysisCallback_' + Date.now();
+        window[cbName] = (data) => {
+            delete window[cbName];
+            onComplete(data);
+        };
+        const script = document.createElement('script');
+        script.src = `/api_analysis.py?callback=${cbName}&t=${Date.now()}`;
+        document.body.appendChild(script);
+    }
+
+    /**
+     * 分析セクション（サマリー統計・経済効果グラフ・蓄電池グラフ）を描画する。
+     * @param {Object} data - api_analysis.py から取得したデータ
+     */
+    function initAnalysisCharts(data) {
+        // --- サマリー統計の反映 ---
+        const s = data.summary || {};
+        const setStat = (id, valueHtml) => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = valueHtml;
+        };
+        setStat('sumSellIncome', `${formatYen(s.sell_income)}<span class="stat-unit">円</span>`);
+        setStat('sumBuyCost', `${formatYen(s.buy_cost)}<span class="stat-unit">円</span>`);
+        setStat('sumMerit', `${formatYen(s.merit_total)}<span class="stat-unit">円</span>`);
+        setStat('sumBattery',
+            `${s.full_days} / ${s.empty_days}<span class="stat-unit">日（満充電 / 完全放電・全${s.total_days}日）</span>`);
+
+        // 料金条件の注記
+        const r = data.rate || {};
+        const note = document.getElementById('rateNote');
+        if (note && r.sell !== undefined) {
+            note.textContent =
+                `※ 試算条件: 買電 従量電灯B相当（基本料金${r.basic}円/月＋段階単価＋再エネ賦課金${r.levy}円/kWh）、`
+                + `売電${r.sell}円/kWh。実収支＝売電収入−買電支出、導入メリット＝全量買電した場合との差額。`;
+        }
+
+        // --- 経済効果グラフ（棒：実収支 / 棒：導入メリット） ---
+        const econColors = {
+            actual: getCss('--color-sel') || '#c687d9',
+            merit: getCss('--color-gen') || '#97c305',
+        };
+        new Chart(document.getElementById('econChart'), {
+            type: 'bar',
+            data: {
+                labels: data.monthly_labels,
+                datasets: [
+                    {
+                        label: '実収支（売電−買電）', data: data.econ_actual,
+                        backgroundColor: econColors.actual + '99', borderColor: econColors.actual,
+                        borderWidth: 1,
+                    },
+                    {
+                        label: '導入メリット（全量買電との差額）', data: data.econ_merit,
+                        backgroundColor: econColors.merit + '99', borderColor: econColors.merit,
+                        borderWidth: 1,
+                    },
+                ]
+            },
+            options: {
+                ...commonOpts,
+                plugins: {
+                    ...commonOpts.plugins,
+                    datalabels: {
+                        display: true, anchor: 'end', align: 'end',
+                        font: { family: 'Outfit', size: 9, weight: 'bold' },
+                        formatter: (v) => (v || v === 0) ? v.toLocaleString('ja-JP') : ''
+                    },
+                    tooltip: {
+                        ...commonOpts.plugins.tooltip,
+                        callbacks: {
+                            label: (ctx) => ctx.dataset.label + ': '
+                                + Math.round(ctx.parsed.y).toLocaleString('ja-JP') + ' 円'
+                        }
+                    }
+                },
+                clip: false,
+                scales: {
+                    ...commonOpts.scales,
+                    y: {
+                        ...commonOpts.scales.y,
+                        ticks: {
+                            ...commonOpts.scales.y.ticks,
+                            callback: (v) => v.toLocaleString('ja-JP')
+                        }
+                    },
+                    'y-axis-soc': { display: false }
+                }
+            }
+        });
+
+        // --- 蓄電池グラフ（棒：充放電平均 / 折れ線：SOC平均、SOCは右軸） ---
+        const batChargeColor = getCss('--color-char') || '#0a87c9';
+        const batDisColor = getCss('--color-dis') || '#a77a00';
+        const batSocColor = getCss('--color-bat') || '#34aa55';
+        new Chart(document.getElementById('batteryChart'), {
+            type: 'bar',
+            data: {
+                labels: data.hourly_labels,
+                datasets: [
+                    {
+                        type: 'bar', label: '充電（平均）', data: data.hourly_charge,
+                        backgroundColor: batChargeColor + '99', borderColor: batChargeColor,
+                        borderWidth: 1, order: 2,
+                    },
+                    {
+                        type: 'bar', label: '放電（平均）', data: data.hourly_discharge,
+                        backgroundColor: batDisColor + '99', borderColor: batDisColor,
+                        borderWidth: 1, order: 2,
+                    },
+                    {
+                        type: 'line', label: 'SOC（平均）', data: data.hourly_soc,
+                        borderColor: batSocColor, backgroundColor: 'rgba(52,170,85,0.15)',
+                        borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true,
+                        yAxisID: 'y-axis-soc', order: 1, spanGaps: true,
+                    },
+                ]
+            },
+            options: {
+                ...commonOpts,
+                plugins: {
+                    ...commonOpts.plugins,
+                    datalabels: { display: false },
+                    tooltip: {
+                        ...commonOpts.plugins.tooltip,
+                        callbacks: {
+                            label: (ctx) => {
+                                if (ctx.dataset.label.includes('SOC')) {
+                                    return ctx.dataset.label + ': ' + ctx.parsed.y + ' %';
+                                }
+                                return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(3) + ' kWh';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    ...commonOpts.scales,
+                    x: { ...commonOpts.scales.x, grid: { display: false } },
+                    y: {
+                        ...commonOpts.scales.y, min: 0,
+                        ticks: { ...commonOpts.scales.y.ticks, callback: (v) => v.toFixed(2) }
+                    },
+                    'y-axis-soc': {
+                        ...commonOpts.scales['y-axis-soc'],
+                        min: 0, max: 100,
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * CSS変数の値を取得する（系統色をJSと共有するため）。
+     * @param {string} varName - 例: '--color-gen'
+     * @returns {string} トリム済みの値。未定義なら空文字。
+     */
+    function getCss(varName) {
+        return getComputedStyle(document.documentElement)
+            .getPropertyValue(varName).trim();
+    }
+
+    // 分析データの取得・描画（初回のみ）
+    fetchAnalysisData(initAnalysisCharts);
+
     // 初回フェッチ: 30日間
     fetchChartData(rangeToParams('30d'), window.initAllCharts);
 });

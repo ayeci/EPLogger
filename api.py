@@ -310,3 +310,211 @@ def view_data():
     # JSONシリアライズして JSONP 文字列として返す
     json_data = json.dumps(data)
     return Response(f"{callback}({json_data});", mimetype='application/javascript')
+
+
+# --- 料金設定（東京電力 従量電灯B 50A 相当の標準値。実際の契約に合わせて調整可） ---
+# 基本料金・段階単価・再エネ賦課金は変更があり得るため、ここで一元管理する
+RATE_BASIC_MONTHLY = 1558.75      # 基本料金（円/月、50A）
+RATE_TIER1_PRICE, RATE_TIER1_MAX = 29.80, 120   # 第1段階（〜120kWh/月）
+RATE_TIER2_PRICE, RATE_TIER2_MAX = 36.40, 300   # 第2段階（120〜300kWh/月）
+RATE_TIER3_PRICE = 40.49                          # 第3段階（300kWh/月超）
+RATE_RENEWABLE_LEVY = 3.49        # 再エネ発電促進賦課金（円/kWh）
+
+# 売電単価スケジュール（適用開始日つき）。
+# 売電は受給開始日以降に発生し、単価は時期で変わり得るため、
+# 「全期間一律」ではなく「適用開始日つきのテーブル」で管理する。
+#
+# 形式    : (適用開始日 'YYYY-MM-DD', 単価[円/kWh]) のリスト。最初の適用開始日より前は単価0（売電対象外）。
+SELL_RATE_SCHEDULE = [
+    ("2026-02-21", 24.00),
+]
+
+import bisect
+
+# SELL_RATE_SCHEDULE を適用開始日昇順にソートし、二分探索用の配列を用意する
+_SELL_SCHED = sorted(SELL_RATE_SCHEDULE, key=lambda x: x[0])
+_SELL_SCHED_DATES = [d for d, _ in _SELL_SCHED]
+_SELL_SCHED_RATES = [r for _, r in _SELL_SCHED]
+
+
+def _sell_rate_for(date_iso):
+    """
+    指定日に適用される売電単価[円/kWh]を返す。
+
+    Args:
+        date_iso (str): 'YYYY-MM-DD' 形式の日付文字列。
+
+    Returns:
+        float: 適用単価。最初の適用開始日より前の日付は 0.0（売電対象外）。
+    """
+    i = bisect.bisect_right(_SELL_SCHED_DATES, date_iso) - 1
+    if i < 0:
+        return 0.0
+    return _SELL_SCHED_RATES[i]
+
+
+def _buy_energy_charge(kwh):
+    """
+    買電量[kWh]から従量料金（三段階）＋再エネ賦課金を計算する（基本料金は含まない）。
+
+    Args:
+        kwh (float): 月間の買電電力量[kWh]。
+
+    Returns:
+        float: 電力量料金＋再エネ賦課金の合計[円]。
+    """
+    if kwh <= RATE_TIER1_MAX:
+        energy = kwh * RATE_TIER1_PRICE
+    elif kwh <= RATE_TIER2_MAX:
+        energy = (RATE_TIER1_MAX * RATE_TIER1_PRICE
+                  + (kwh - RATE_TIER1_MAX) * RATE_TIER2_PRICE)
+    else:
+        energy = (RATE_TIER1_MAX * RATE_TIER1_PRICE
+                  + (RATE_TIER2_MAX - RATE_TIER1_MAX) * RATE_TIER2_PRICE
+                  + (kwh - RATE_TIER2_MAX) * RATE_TIER3_PRICE)
+    return energy + kwh * RATE_RENEWABLE_LEVY
+
+
+@view_data_bp.route('/api_analysis.py')
+def view_analysis():
+    """
+    経済効果と蓄電池運用分析のデータを集計し、JSONP形式で返す。
+
+    月次の電力収支・経済効果（実収支とシステム導入メリットの両建て）、
+    および時間帯別の充放電・SOC推移を成形して返却する。
+
+    URLパラメータ:
+        callback (str): JSONPのコールバック関数名。デフォルトは 'callback'。
+
+    戻り値:
+        Response: `callbackName({ ...データ... });` 形式のJavaScript文字列。
+    """
+    callback = request.args.get('callback', 'callback')
+
+    empty = {
+        "monthly_labels": [], "econ_actual": [], "econ_merit": [],
+        "self_sufficiency": [], "self_consumption": [],
+        "hourly_labels": [], "hourly_charge": [], "hourly_discharge": [], "hourly_soc": [],
+        "summary": {}, "rate": {}
+    }
+
+    if not os.path.exists(PUBLIC_CSV):
+        return Response(f"{callback}({json.dumps(empty)});", mimetype='application/javascript')
+
+    df = pd.read_csv(PUBLIC_CSV, encoding=CSV_ENCODING)
+    col_date = df.columns[0]
+    col_time = df.columns[1]
+    power_columns = df.columns[2:8].tolist()  # 発電・消費・売電・買電・充電・放電
+
+    # 数値化（カンマ区切り等の混入に備えてcoerce）
+    for c in power_columns + ["蓄電残量(SOC)[%]"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    # 先頭行などの欠損は0で補完（売電・充電に初期欠損があるため）
+    df[power_columns] = df[power_columns].fillna(0)
+
+    col_gen, col_con, col_sel, col_buy, col_cha, col_dis = power_columns
+
+    # --- 月次集計 ---
+    dt = pd.to_datetime(df[col_date] + " " + df[col_time], format="%Y/%m/%d %H:%M")
+    df["_month"] = dt.dt.strftime("%Y-%m")
+    df["_hour"] = dt.dt.hour
+
+    # 行ごとの日付（ISO形式）を用意し、その日に適用される単価で売電収入を算出
+    iso_dates = dt.dt.strftime("%Y-%m-%d")
+    df["_sell_income_row"] = [
+        float(s) * _sell_rate_for(d)
+        for s, d in zip(df[col_sel], iso_dates)
+    ]
+
+    grp = df.groupby("_month")
+    monthly_labels, econ_actual, econ_merit = [], [], []
+    self_sufficiency, self_consumption = [], []
+
+    total_sell_income = 0.0
+    total_buy_cost = 0.0
+    total_merit = 0.0
+
+    for month in sorted(grp.groups.keys()):
+        g = grp.get_group(month)
+        gen = float(g[col_gen].sum())
+        con = float(g[col_con].sum())
+        sel = float(g[col_sel].sum())
+        buy = float(g[col_buy].sum())
+
+        # 実際の収支：売電収入 − 買電支出（基本料金込み）
+        # 売電収入は行ごとに適用単価を当てた _sell_income_row 列の月次合計を使う
+        sell_income = float(g["_sell_income_row"].sum())
+        buy_cost = _buy_energy_charge(buy) + RATE_BASIC_MONTHLY
+        actual_balance = sell_income - buy_cost  # マイナス＝持ち出し
+
+        # 導入メリット：システムが無く消費全量を買電した場合の料金 − 実質支出
+        virtual_cost = _buy_energy_charge(con) + RATE_BASIC_MONTHLY
+        actual_net_cost = buy_cost - sell_income   # 実質的な持ち出し額
+        merit = virtual_cost - actual_net_cost
+
+        monthly_labels.append(month)
+        econ_actual.append(round(actual_balance))
+        econ_merit.append(round(merit))
+        self_sufficiency.append(round(gen / con * 100, 1) if con > 0 else 0)
+        self_consumption.append(round((gen - sel) / gen * 100, 1) if gen > 0 else 0)
+
+        total_sell_income += sell_income
+        total_buy_cost += buy_cost
+        total_merit += merit
+
+    # --- 時間帯別の充放電・SOC ---
+    hour_grp = df.groupby("_hour")
+    hourly_labels = [f"{h}時" for h in range(24)]
+    hourly_charge, hourly_discharge, hourly_soc = [], [], []
+    for h in range(24):
+        if h in hour_grp.groups:
+            gh = hour_grp.get_group(h)
+            hourly_charge.append(round(float(gh[col_cha].mean()), 3))
+            hourly_discharge.append(round(float(gh[col_dis].mean()), 3))
+            hourly_soc.append(round(float(gh["蓄電残量(SOC)[%]"].mean()), 1))
+        else:
+            hourly_charge.append(0)
+            hourly_discharge.append(0)
+            hourly_soc.append(None)
+
+    # --- 蓄電池サマリー ---
+    soc_daily = df.groupby(col_date)["蓄電残量(SOC)[%]"].agg(["min", "max"])
+    full_days = int((soc_daily["max"] >= 95).sum())
+    empty_days = int((soc_daily["min"] <= 5).sum())
+    total_days = int(len(soc_daily))
+
+    summary = {
+        "sell_income": round(total_sell_income),
+        "buy_cost": round(total_buy_cost),
+        "actual_balance": round(total_sell_income - total_buy_cost),
+        "merit_total": round(total_merit),
+        "total_days": total_days,
+        "full_days": full_days,
+        "empty_days": empty_days,
+        "soc_max_avg": round(float(soc_daily["max"].mean()), 1),
+        "soc_min_avg": round(float(soc_daily["min"].mean()), 1),
+    }
+
+    rate = {
+        "basic": RATE_BASIC_MONTHLY, "tier1": RATE_TIER1_PRICE,
+        "tier2": RATE_TIER2_PRICE, "tier3": RATE_TIER3_PRICE,
+        "levy": RATE_RENEWABLE_LEVY,
+        "sell": _SELL_SCHED_RATES[-1] if _SELL_SCHED_RATES else 0,  # 代表値（最新単価）
+        "sell_schedule": _SELL_SCHED,  # 参考: 適用開始日つき全単価
+    }
+
+    data = {
+        "monthly_labels": monthly_labels,
+        "econ_actual": econ_actual,
+        "econ_merit": econ_merit,
+        "self_sufficiency": self_sufficiency,
+        "self_consumption": self_consumption,
+        "hourly_labels": hourly_labels,
+        "hourly_charge": hourly_charge,
+        "hourly_discharge": hourly_discharge,
+        "hourly_soc": hourly_soc,
+        "summary": summary,
+        "rate": rate,
+    }
+    return Response(f"{callback}({json.dumps(data)});", mimetype='application/javascript')
