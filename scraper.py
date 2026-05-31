@@ -248,10 +248,6 @@ def update_status_json(battery_status="不明", battery_charge="--"):
         next_update_dt = last_dt + timedelta(minutes=31)
 
         # ISO 8601 形式 (Z付き) で保存
-        # Python の isoformat は末尾が +09:00 等になるが、
-        # 要望の Date.toISOString (UTC/Z) に合わせる場合は UTC に変換する必要がある。
-        # ここでは単純に文字列として "Z" を付加するか、JST 表記のまま ISO 形式にする。
-        # ユーザーの要望は Date.toISOString 形式なので、ここでは一旦簡易的に Z 付加形式にする。
         status_data = {
             "updated": last_dt.strftime('%Y-%m-%dT%H:%M:00.000Z'),
             "next_update": next_update_dt.strftime('%Y-%m-%dT%H:%M:00.000Z'),
@@ -269,95 +265,199 @@ def update_status_json(battery_status="不明", battery_charge="--"):
 
 
 # ========================================
-# メイン処理: ログイン → ダウンロード → マージ
+# 取得月リストの算出
 # ========================================
-def crawl(target_month):
-    """
-    太陽光発電監視サイトにログインし、指定月のCSVデータをダウンロードしてマージする。
+def _month_range(start_ym, end_ym):
+    """'YYYY-MM' の start から end まで（両端含む）の月リストを昇順で返す"""
+    result = []
+    y, m = map(int, start_ym.split('-'))
+    ey, em = map(int, end_ym.split('-'))
+    while (y, m) <= (ey, em):
+        result.append(f'{y:04d}-{m:02d}')
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return result
 
-    処理の流れ:
-        1. Seleniumでログインページにアクセスし認証
-        2. ダッシュボードから蓄電池情報（充放電状態・残量）をスクレイピング
-        3. CSV出力画面に遷移し、対象月の30分データをダウンロード
-        4. merge_csv() でdata.csvに差分マージ
-        5. update_status_json() でstatus.jsonを更新
+
+def get_months_to_fetch(current_month_str):
+    """
+    data.csv の末尾を確認し、取得が必要な月のリストを返す。
+
+    判定ルール:
+      - data.csv 未存在 / 空 / 最終取得が当月  → [current_month_str]
+      - 月またぎ かつ 最終取得時刻が '23:30'    → 最終取得の翌月〜当月
+      - 月またぎ かつ 最終取得時刻が '23:30' 以外 → 最終取得月〜当月（途中から補完）
 
     Args:
-        target_month (str): 'YYYY-MM' 形式の対象年月。
+        current_month_str (str): 今回取得対象の 'YYYY-MM' 文字列。
 
     Returns:
-        bool: 全処理が正常完了した場合はTrue、エラー発生時はFalse。
+        list[str]: 取得すべき月の 'YYYY-MM' リスト（昇順）。
     """
-    
-    log_with_memory("--- データ取得開始: " + target_month + " ---")
+    if not os.path.exists(PUBLIC_CSV):
+        return [current_month_str]
+    try:
+        df = pd.read_csv(PUBLIC_CSV, encoding=CSV_ENCODING)
+        if df.empty:
+            return [current_month_str]
+
+        col_date = df.columns[0]
+        col_time = df.columns[1]
+
+        last_date = str(df[col_date].iloc[-1])  # 'YYYY/MM/DD'
+        last_time = str(df[col_time].iloc[-1])  # 'HH:MM'
+
+        last_month = datetime.strptime(last_date, '%Y/%m/%d').strftime('%Y-%m')
+
+        if last_month == current_month_str:
+            return [current_month_str]
+
+        # 月をまたいでいる
+        logger.info("月またぎを検出: 最終取得=%s %s, 取得対象=%s",
+                    last_date, last_time, current_month_str)
+
+        if last_time == '23:30':
+            # 最終取得月は末尾まで取得済み → 翌月から
+            y, m = map(int, last_month.split('-'))
+            m += 1
+            if m > 12:
+                m, y = 1, y + 1
+            start_month = f'{y:04d}-{m:02d}'
+        else:
+            # 最終取得月が途中まで → その月から再取得して補完
+            start_month = last_month
+
+        months = _month_range(start_month, current_month_str)
+        logger.info("取得月リスト: %s", months)
+        return months
+
+    except Exception as e:
+        logger.warning("取得月リスト算出中にエラーが発生しました: %s", e)
+        return [current_month_str]
+
+
+# ========================================
+# メイン処理: ログイン → ダウンロード → マージ
+# ========================================
+def _login(driver, wait):
+    """
+    ログインページにアクセスして認証し、蓄電池情報を取得する。
+
+    Returns:
+        tuple[str, str]: (battery_status, battery_charge)
+    """
+    log_with_memory("ログイン画面にアクセス中...")
+    driver.get(LOGIN_URL)
+    wait.until(EC.presence_of_element_located((By.ID, "loginid"))).send_keys(LOGIN_ID)
+    driver.find_element(By.ID, "loginpassword").send_keys(LOGIN_PASSWORD)
+    driver.find_element(By.ID, "login-button").click()
+    log_with_memory("ログインボタンを押下しました")
+
+    log_with_memory("蓄電池情報を取得中...")
+    try:
+        time.sleep(3)
+        battery_status = wait.until(EC.presence_of_element_located(
+            (By.XPATH, "/html/body/div/div[9]/div[4]/div[2]/div[3]/table[3]/tbody/tr[2]/td[1]"))).text
+        battery_charge = driver.find_element(
+            By.XPATH, "/html/body/div/div[9]/div[4]/div[2]/div[3]/table[3]/tbody/tr[2]/td[2]").text
+        logger.info("蓄電池情報 取得成功: 状態=%s, 残量=%s", battery_status, battery_charge)
+    except Exception as e:
+        logger.warning("蓄電池情報の取得に失敗しました: %s", e)
+        battery_status = "取得失敗"
+        battery_charge = "--"
+
+    return battery_status, battery_charge
+
+
+def _navigate_to_download_form(driver):
+    """ダッシュボードから計測データCSVのダウンロードフォームへ遷移する"""
+    log_with_memory("ダウンロード画面にアクセス中...")
+    submit_btn = driver.find_element(
+        By.XPATH, "/html/body/div/div[9]/div[5]/div[3]/form/button")
+    driver.execute_script("arguments[0].click();", submit_btn)
+    log_with_memory("各種データのCSV出力ボタンを押下しました")
+
+    submit_btn = driver.find_element(
+        By.XPATH, "/html/body/div/div[9]/div[1]/div[1]/form/button")
+    driver.execute_script("arguments[0].click();", submit_btn)
+    log_with_memory("計測データのCSV出力ボタンを押下しました")
+
+
+def _download_and_merge(driver, wait, target_month):
+    """
+    ダウンロードフォーム表示済みの状態で、指定月を選択してCSVを取得・マージする。
+    ダウンロード後もフォームページに留まるため、連続して呼び出すことができる。
+
+    Args:
+        driver: WebDriverインスタンス（ダウンロードフォーム表示済みであること）
+        wait: WebDriverWaitインスタンス
+        target_month (str): 'YYYY-MM' 形式の対象年月
+
+    Returns:
+        bool: 成功した場合True
+    """
+    log_with_memory(f"セレクトボックスを設定中... ({target_month})")
+    Select(wait.until(EC.presence_of_element_located(
+        (By.NAME, "outputFormat")))).select_by_value("太陽光発電＋蓄電池")
+    Select(driver.find_element(
+        By.NAME, "aggrType")).select_by_value("30分データ")
+    Select(driver.find_element(
+        By.NAME, "collectDate")).select_by_value(target_month)
+
+    submit_btn = driver.find_element(
+        By.XPATH, "/html/body/div/div[9]/div/form/div[3]/button[2]")
+    driver.execute_script("arguments[0].click();", submit_btn)
+    logger.info("ダウンロードを開始しました: %s", target_month)
+
+    downloaded_file = wait_for_download()
+    if not downloaded_file:
+        logger.error("ダウンロードがタイムアウトしました（%d秒）: %s", DOWNLOAD_TIMEOUT, target_month)
+        return False
+
+    merge_csv(downloaded_file)
+    return True
+
+
+def crawl(months):
+    """
+    1回のログインで複数月のCSVデータをダウンロード・マージする。
+
+    処理の流れ:
+        1. ログイン + 蓄電池情報取得（1回のみ）
+        2. CSVダウンロードフォームへ遷移（1回のみ）
+        3. 指定月ぶんだけ「月選択 → ダウンロード → マージ」をループ
+           （ダウンロード後もフォームに留まるため再遷移不要）
+        4. status.json を更新
+
+    Args:
+        months (list[str]): 取得対象の 'YYYY-MM' リスト（昇順）。
+
+    Returns:
+        bool: 全月の処理が正常完了した場合はTrue。
+    """
+    if not months:
+        logger.warning("取得対象月が空です")
+        return True
+
+    log_with_memory("--- データ取得開始: " + ', '.join(months) + " ---")
     driver = get_driver()
     wait = WebDriverWait(driver, 20)
 
     try:
-        # --- 1. ログイン ---
-        log_with_memory("ログイン画面にアクセス中...")
-        driver.get(LOGIN_URL)
-        wait.until(EC.presence_of_element_located((By.ID, "loginid"))).send_keys(LOGIN_ID)
-        driver.find_element(By.ID, "loginpassword").send_keys(LOGIN_PASSWORD)
-        driver.find_element(By.ID, "login-button").click()
-        log_with_memory("ログインボタンを押下しました")
+        battery_status, battery_charge = _login(driver, wait)
+        _navigate_to_download_form(driver)
 
-        # --- 2. 蓄電池情報の取得 (ログイン後ダッシュボードより) ---
-        log_with_memory("蓄電池情報を取得中...")
-        try:
-            # ログイン直後のダッシュボードで少し待機
-            time.sleep(3)
-            battery_status = wait.until(EC.presence_of_element_located(
-                (By.XPATH, "/html/body/div/div[9]/div[4]/div[2]/div[3]/table[3]/tbody/tr[2]/td[1]"))).text
-            battery_charge = driver.find_element(
-                By.XPATH, "/html/body/div/div[9]/div[4]/div[2]/div[3]/table[3]/tbody/tr[2]/td[2]").text
-            logger.info("蓄電池情報 取得成功: 状態=%s, 残量=%s", battery_status, battery_charge)
-        except Exception as e:
-            logger.warning("蓄電池情報の取得に失敗しました: %s", e)
-            battery_status = "取得失敗"
-            battery_charge = "--"
+        success = True
+        for i, month in enumerate(months):
+            log_with_memory(f"--- {month} のダウンロード開始 ({i + 1}/{len(months)}) ---")
+            if not _download_and_merge(driver, wait, month):
+                logger.error("%s のダウンロードに失敗しました", month)
+                success = False
 
-        # --- 3. CSVダウンロード画面へ遷移 ---
-        log_with_memory("ダウンロード画面にアクセス中...")
-        submit_btn = driver.find_element(
-            By.XPATH, "/html/body/div/div[9]/div[5]/div[3]/form/button")
-        driver.execute_script("arguments[0].click();", submit_btn)
-        log_with_memory("各種データのCSV出力ボタンを押下しました")
-
-        submit_btn = driver.find_element(
-            By.XPATH, "/html/body/div/div[9]/div[1]/div[1]/form/button")
-        driver.execute_script("arguments[0].click();", submit_btn)
-        log_with_memory("計測データのCSV出力ボタンを押下しました")
-
-        # 2-1. Select×3個を設定（hidden項目があるためJSクリックを使用）
-        log_with_memory("セレクトボックスを設定中...")
-        Select(wait.until(EC.presence_of_element_located(
-            (By.NAME, "outputFormat")))).select_by_value("太陽光発電＋蓄電池")
-        Select(driver.find_element(
-            By.NAME, "aggrType")).select_by_value("30分データ")
-        Select(driver.find_element(
-            By.NAME, "collectDate")).select_by_value(target_month)
-
-        # 2-2. submitボタンをクリック（hidden項目があるためJSクリックで確実に実行）
-        submit_btn = driver.find_element(
-            By.XPATH, "/html/body/div/div[9]/div/form/div[3]/button[2]")
-        driver.execute_script("arguments[0].click();", submit_btn)
-        logger.info("ダウンロードを開始しました")
-
-        # 2-3. ダウンロード完了待機
-        downloaded_file = wait_for_download()
-        if not downloaded_file:
-            logger.error("ダウンロードがタイムアウトしました（%d秒）", DOWNLOAD_TIMEOUT)
-            return False
-
-        # --- 4. 日次・月次・年次データ洗い替え ---
-        merge_csv(downloaded_file)
-        
-        # --- 5. ステータス JSON 更新 ---
         update_status_json(battery_status, battery_charge)
-
         logger.info("===== データ更新が完了しました =====")
-        return True
+        return success
 
     except Exception as e:
         logger.exception("データ取得中にエラーが発生しました: %s", e)
@@ -379,5 +479,6 @@ if __name__ == '__main__':
     else:
         month = datetime.now().strftime('%Y-%m')
 
-    success = crawl(month)
+    months = get_months_to_fetch(month)
+    success = crawl(months)
     sys.exit(0 if success else 1)
