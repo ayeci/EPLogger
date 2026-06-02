@@ -69,5 +69,8 @@ Scripts/
 ehthumbs.db
 Thumbs.db
 
-# === Testing / Internal ===
+# Testing / Internal
 test_*.py
+
+# Log files
+logs/

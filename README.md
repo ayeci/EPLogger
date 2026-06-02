@@ -8,6 +8,8 @@
 - **リアルタイム可視化:** Chart.js による直近24時間・全期間・週間累計のインタラクティブな電力グラフ（30分単位で自動リロード）
 - **蓄電池モニタリング:** 充電/放電ステータスとSOC（残量%）を表示
 - **気象情報連携:** 気象庁API（週間天気予報）、Yahoo!天気API（2時間降水予測）を統合表示
+- **経済効果分析:** 月次の売電収入・買電支出・導入メリットの集計と可視化
+- **音声レポート:** ローカルLLM（Ollama）で最新の発電状況を要約し、VoiceVoxで音声合成してGoogle Home（Castデバイス）で再生
 
 ![ダッシュボードのスクリーンショット(PC)](image_pc.png)
 (イメージはPC版。レスポンシブ対応でモバイルアクセスでも閲覧可能。)
@@ -20,6 +22,8 @@ EPLogger/
 ├── app.py               # Flaskダッシュボードサーバ
 ├── api.py               # JSONP形式でグラフデータを提供するBlueprint
 ├── get_past_weather.py  # 気象庁の過去気象データ取得スクリプト
+├── report_summary.py    # 音声レポート（LLM要約 → VoiceVox合成 → Cast再生）
+├── zundamon.modelfile   # Ollamaカスタムモデル定義（ずんだもんっぽくしゃべってくれるキャラクター定義）
 ├── .env                 # 環境変数（認証情報・APIキー）
 ├── .gitignore
 ├── templates/
@@ -53,8 +57,14 @@ python -m venv .
 ### 2. 依存パッケージのインストール
 
 ```bash
+# ダッシュボード本体
 pip install flask pandas selenium webdriver-manager python-dotenv requests
+
+# 音声レポート機能（report_summary.py）を使う場合のみ追加
+pip install ollama pychromecast
 ```
+
+> 音声レポートは Ollama（ローカルLLM）・VoiceVox（TTS）・Google Home（Castデバイス）を別途用意する必要があります。詳細は「音声レポートの実行」を参照してください。
 
 ### 3. 環境変数の設定
 
@@ -70,6 +80,19 @@ JMA_AREA_CODE0=<都道府県コード>  # 気象庁 週間予報API用（例: 13
 JMA_AREA_CODE1=<天気エリアコード> # 気象庁 天気情報エリア（例: 130010=東京地方(本州)）
 JMA_AREA_CODE2=<気温エリアコード> # 気象庁 気温情報エリア（例: 44132=東京）
 JMA_STATION_NUM=<観測所番号>     # 気象庁 過去の気象データ用（例: a1133=府中）
+
+# Google Home / Cast デバイス
+GOOGLE_HOME_NAME=YourSpeakerName
+PC_IP=192.168.x.x
+SERVE_PORT=8765
+
+# VoiceVox
+VOICEVOX_URL=http://localhost:50021
+SPEAKER_ID=3
+
+# Ollama（zundamon.modelfile から ollama create zundamon で作成）
+OLLAMA_MODEL=zundamon
+OLLAMA_HOST=http://localhost:11434
 ```
 
 1. `JMA_AREA_CODE0` は 都道府県番号2桁+0000
@@ -205,21 +228,77 @@ crontab -e
 ```
 # scraper.py の設定
 プログラム: python
-引数:       D:\Users\ayebee\source\repos\EPLogger\scraper.py
-開始:       D:\Users\ayebee\source\repos\EPLogger
+引数:       D:\path\to\EPLogger\scraper.py
+開始:       D:\path\to\EPLogger
 トリガー:   30分ごとに繰り返し
 
-# get_past_weather.py の設定
+# report_summary.py の設定
 プログラム: python
-引数:       D:\Users\ayebee\source\repos\EPLogger\get_past_weather.py
-開始:       D:\Users\ayebee\source\repos\EPLogger
-トリガー:   毎日 0:00
+引数:       D:\path\to\EPLogger\get_past_weather.py
+開始:       D:\path\to\EPLogger
+トリガー:   毎日 7:00, 12:00, 17:00 （任意の時間に設定してあげてください）
 ```
 
 ### 過去気象データの取得
 
 ```bash
 python get_past_weather.py
+```
+
+### 音声レポートの実行
+
+最新の発電状況を音声でGoogle Homeに通知します。
+
+```bash
+python report_summary.py
+```
+
+#### 処理の流れ
+
+1. `static/data.csv` の末尾行（最新の30分データ）を読み込む
+2. 発電・消費・SOCなどをプロンプトに整形し、OllamaのローカルLLMに送信
+3. LLMが生成したテキスト（30字以内の発電状況サマリ）をVoiceVoxで音声合成してWAVファイルを生成
+4. ローカルのFlaskサーバで一時的にWAVファイルを配信し、Google Home（Castデバイス）で再生
+
+#### 前提環境
+
+| コンポーネント | 役割 | 備考 |
+|:---|:---|:---|
+| [Ollama](https://ollama.com/) | ローカルLLM実行環境 | `.env` の `OLLAMA_MODEL` でモデル名を指定 |
+| ずんだもんモデル（`zundamon`） | キャラクター口調での要約 | `zundamon.modelfile` から作成する（下記参照） |
+| [VoiceVox](https://voicevox.hiroshiba.jp/) | テキスト音声合成（TTS） | ローカルで起動しておく（デフォルト: `localhost:50021`） |
+| Google Home / Castデバイス | 音声再生 | PCと同一LAN上に配置する |
+
+#### カスタムモデルの作成（ずんだもん）
+
+ベースモデル（`gemma3:4b`）を取得し、カスタムモデルをビルドします。
+
+```bash
+# ベースモデルを取得（初回のみ・数GB）
+ollama pull gemma3:4b
+
+# ずんだもんモデルを作成
+ollama create zundamon -f zundamon.modelfile
+```
+
+作成したモデルは以下で動作確認できます。
+
+```bash
+ollama run zundamon "今の発電状況をまとめて"
+```
+
+> キャラクター設定（一人称・語尾・口調）はすべて `zundamon.modelfile` の `SYSTEM` ブロックに記述されており、`report_summary.py` 側には口調を固定するコードはありません。モデルをビルドし直すだけで口調変更できます。
+
+#### `.env` に追加が必要な変数
+
+```env
+GOOGLE_HOME_NAME=<Google Homeのデバイス名（Homeアプリで確認）>
+PC_IP=<このPCのLAN内IPアドレス>
+SERVE_PORT=8765               # WAVファイル配信ポート（競合しなければ変更可）
+VOICEVOX_URL=http://localhost:50021
+SPEAKER_ID=3                  # VoiceVoxの話者ID
+OLLAMA_MODEL=zundamon         # zundamon.modelfile から作成したカスタムモデル名
+OLLAMA_HOST=http://localhost:11434
 ```
 
 ## アーキテクチャ
@@ -236,6 +315,7 @@ graph TD
         Scraper[<strong>scraper.py 等</strong><br>バッチスクレイパー]
         App[<strong>app.py</strong><br>Flaskメインサーバ]
         API[<strong>api.py</strong><br>JSONP Blueprint]
+        Report[<strong>report_summary.py</strong><br>音声レポート]
     end
 
     subgraph Storage[ローカルデータ]
@@ -247,6 +327,12 @@ graph TD
     subgraph Frontend[フロントエンド ブラウザ]
         HTML[<strong>index.html</strong><br>ダッシュボード]
         Assets[<strong>view.js & style.css<br>Chart.js</strong> / BS5]
+    end
+
+    subgraph VoiceLocal[ローカルサービス]
+        Ollama((<strong>Ollama</strong><br>ローカルLLM))
+        VoiceVox((<strong>VoiceVox</strong><br>TTS音声合成))
+        GoogleHome((<strong>Google Home</strong><br>Castデバイス))
     end
 
     %% スクレイピングとファイル処理のフロー
@@ -270,6 +356,14 @@ graph TD
     App ===>|HTTP| HTML
     API -.->|JSONP非同期通信| HTML
     Assets -.->|デザイン・グラフ描画| HTML
+
+    %% 音声レポートのフロー
+    Data -->|最新行を読込| Report
+    Report -->|プロンプト送信| Ollama
+    Ollama -->|要約テキスト| Report
+    Report -->|テキスト| VoiceVox
+    VoiceVox -->|WAVデータ| Report
+    Report -->|HTTP配信 & Cast| GoogleHome
 ```
 
 ## ダッシュボード表示内容
@@ -281,8 +375,9 @@ graph TD
 | 本日累計 | 発電・消費・売電・買電の当日累計kWh |
 | バッテリー | 充電/放電アイコン + SOC残量% |
 | 直近24時間グラフ | 発電・消費・売電・買電・充電・放電 + SOC折れ線 |
-| 全期間グラフ | 保持データ全期間のトレンド（日付変更線付き） |
+| 30日間 / 全件モニタリング（タブ切替） | 期間別のトレンドグラフ（日付変更線付き） |
 | 週間累計グラフ | 日ごとの累計棒グラフ |
+| 経済効果・蓄電池運用の分析 | 月次売電収入・買電支出・導入メリット、時間帯別充放電・SOC平均 |
 
 ## 技術スタック
 
@@ -290,6 +385,7 @@ graph TD
 - **スクレイピング:** Selenium, webdriver-manager
 - **フロントエンド:** Chart.js, Bootstrap 5, Bootstrap Icons
 - **気象データ:** 気象庁ボサイAPI, Yahoo!天気API
+- **音声レポート:** Ollama（ローカルLLM）, VoiceVox（TTS）, pychromecast（Google Home再生）
 - **環境管理:** python-dotenv
 
 ## OSS Licenses
@@ -298,14 +394,16 @@ graph TD
 
 ### Python Dependencies
 
-| パッケージ | ライセンス |
-| :--- | :--- |
-| Flask | BSD-3-Clause |
-| pandas | BSD-3-Clause |
-| python-dotenv | BSD-3-Clause |
-| requests | Apache-2.0 |
-| selenium | Apache-2.0 |
-| webdriver-manager | MIT |
+| パッケージ | ライセンス | 用途 |
+| :--- | :--- | :--- |
+| Flask | BSD-3-Clause | Webサーバ |
+| pandas | BSD-3-Clause | データ処理 |
+| python-dotenv | BSD-3-Clause | 環境変数管理 |
+| requests | Apache-2.0 | HTTP通信 |
+| selenium | Apache-2.0 | スクレイピング |
+| webdriver-manager | MIT | ChromeDriver管理 |
+| ollama | MIT | ローカルLLM（音声レポート） |
+| pychromecast | MIT | Google Home再生（音声レポート） |
 
 ### Frontend Dependencies
 
