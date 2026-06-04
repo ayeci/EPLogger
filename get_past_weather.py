@@ -7,6 +7,9 @@ get_past_weather.py - 気象庁の過去気象データをダウンロードし�
 気象庁の「過去の気象データ・ダウンロード」ページ（https://www.data.jma.go.jp/risk/obsdl/）
 からPOSTリクエストでCSVデータを取得し、pandasで整形したうえで
 static/past_weather.csv に保存する。元データは backup/ にバックアップされる。
+
+WAF対策: JMAサイトはCloudFront WAFで sec-fetch-user ヘッダーを検証する。
+requests で sec-fetch-user: ?1 を明示的に送信することで回避する。
 """
 import psutil
 import requests
@@ -14,7 +17,7 @@ import logging
 import pandas as pd
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 import calendar
 from dotenv import load_dotenv
 
@@ -26,19 +29,13 @@ logger = logging.getLogger(__name__)
 
 def log_with_memory(message):
     try:
-        # 自分自身（Pythonプロセス）を取得
         parent = psutil.Process(os.getpid())
-        # 自分のメモリ
         total_mem = parent.memory_info().rss
-        
-        # すべての子プロセス（Chrome、ChromeDriverなど）を再帰的に取得して加算
         for child in parent.children(recursive=True):
             try:
                 total_mem += child.memory_info().rss
             except (psutil.NoSuchProcess, psutil.AccessDenied):
-                # 計測途中でプロセスが終了した場合などはスキップ
                 pass
-        
         mem_mb = total_mem / 1024 / 1024
         logging.info(f"{message} (Total Memory: {mem_mb:.2f} MB)")
     except Exception as e:
@@ -49,15 +46,14 @@ def _build_ymd_list():
     気象庁APIリクエスト用のymdListパラメータを生成する。
 
     現在日付を基準に、前月の同日（存在しない場合は前月末日）から
-    当日までの期間を表すJSON文字列を返す。
+    昨日までの期間を返す。JMAは当日データがまだ不完全なため昨日を終端とする。
 
     Returns:
-        str: '["前年","当年","前月","当月","前月日","当日"]' 形式のJSON文字列。
+        list: [前年, 当年, 前月, 当月, 前月日, 昨日] の文字列リスト。
     """
-
     now = datetime.now()
+    yesterday = now - timedelta(days=1)
 
-    # 前月の年・月を算出（1月の場合は前年12月）
     if now.month > 1:
         prev_year = now.year
         prev_month = now.month - 1
@@ -65,11 +61,19 @@ def _build_ymd_list():
         prev_year = now.year - 1
         prev_month = 12
 
-    # 前月の日数を超えないように調整（例: 3/31 → 2/28）
     prev_month_days = calendar.monthrange(prev_year, prev_month)[1]
     prev_day = min(now.day, prev_month_days)
 
-    return f'["{prev_year}","{now.year}","{prev_month}","{now.month}","{prev_day}","{now.day}"]'
+    return [
+        str(prev_year), str(yesterday.year),
+        str(prev_month), str(yesterday.month),
+        str(prev_day), str(yesterday.day),
+    ]
+
+
+# 取得する気象要素コードリスト
+# JMAのtop/elementで確認した有効コード
+_ELEMENT_NUM_LIST = '[["201",""],["101",""],["401",""],["301",""],["503",""],["610",""],["601",""],["501",""],["604",""],["607",""],["703",""]]'
 
 
 def download_jma_data():
@@ -77,60 +81,59 @@ def download_jma_data():
     気象庁の過去気象データダウンロードAPIにPOSTリクエストを送信し、
     CSVデータを取得して temp/ フォルダに保存する。
 
-    セッション維持でCookieを取得した後、指定したペイロードで
-    データをリクエストする。レスポンスのステータスコードが200の場合は
-    CSVファイルとして、それ以外の場合はHTMLファイルとして保存する。
+    JMAサイトのCloudFront WAFは sec-fetch-user: ?1 ヘッダーを検証する。
+    このヘッダーを明示的に含めることでWAFを通過し、CSVを取得できる。
 
     Returns:
-        list: [ステータスコード (int), ファイルパス (str)] のリスト。
-              トップページへのアクセスに失敗した場合は None を返す。
+        list: [is_success (bool), ファイルパス (str)] のリスト。
     """
-
     log_with_memory("--- 気象庁天気API取得開始 ---")
 
-    url_menu = "https://www.data.jma.go.jp/risk/obsdl/"
     url_init = "https://www.data.jma.go.jp/risk/obsdl/index.php"
     url_download = "https://www.data.jma.go.jp/risk/obsdl/show/table"
 
-    # セッションを維持する
     session = requests.Session()
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": url_menu 
+    # ブラウザと同じヘッダーセット
+    browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+    sec_ch_ua = '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"'
+
+    headers_init = {
+        "User-Agent": browser_ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "sec-ch-ua": sec_ch_ua,
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "dnt": "1",
+        "upgrade-insecure-requests": "1",
     }
 
-    logger.info("気象庁のメニューページにアクセスしてセッション(Cookie)を取得します...")
+    logger.info("気象庁 index.php にアクセスしてAWSALBクッキーを取得します...")
     try:
-        # リダイレクトを追跡せずにステータスコードを確認
-        res = session.get(url_menu, headers=headers, timeout=10, allow_redirects=False)
-        
-        # 300系のステータスコード（リダイレクト）が返った場合は index.php にアクセス
-        if 300 <= res.status_code < 400:
-            logger.info(f"リダイレクト({res.status_code})を検出しました。index.php にアクセスします...")
-            # index.phpへのアクセスのためにRefererとURLを更新
-            headers["Referer"] = url_menu
-            session.get(url_init, headers=headers, timeout=10)
-            
-            # データ取得POSTに向けたRefererの更新
-            headers["Referer"] = url_init
-        else:
-            logger.info(f"ステータスコード {res.status_code} を受信。セッション取得完了。")
-            headers["Referer"] = url_menu
-            
+        session.get(url_init, headers=headers_init, timeout=15)
+        logger.info(f"クッキー取得完了: AWSALB={session.cookies.get('AWSALB', 'N/A')[:20]}...")
     except requests.exceptions.RequestException as e:
-        logger.error(f"セッション取得に失敗しました: {e}")
+        logger.error(f"index.phpアクセスに失敗しました: {e}")
         return [False, ""]
 
-    # payloadはサニタイズ不要！そのままのダブルクォートで渡します
     JMA_STATION_NUM = os.environ.get("JMA_STATION_NUM")
+    if not JMA_STATION_NUM:
+        logger.error("JMA_STATION_NUM が .env に設定されていません")
+        return [False, ""]
+
+    ymd_list = _build_ymd_list()
+    logger.info(f"取得期間: {ymd_list[0]}年{ymd_list[2]}月{ymd_list[4]}日 〜 {ymd_list[1]}年{ymd_list[3]}月{ymd_list[5]}日")
+
+    ymd_json = f'["{ymd_list[0]}","{ymd_list[1]}","{ymd_list[2]}","{ymd_list[3]}","{ymd_list[4]}","{ymd_list[5]}"]'
+
     payload = {
         "stationNumList": f'["{JMA_STATION_NUM}"]',
         "aggrgPeriod": "9",
-        "elementNumList": '[["201",""],["101",""],["401",""],["501",""],["301",""],["503",""],["610",""],["703",""],["601",""]]',
-        "interAnnualType": "2",
-        "ymdList": _build_ymd_list(),
-        "optionNumList": '[]',
+        "elementNumList": _ELEMENT_NUM_LIST,
+        "interAnnualType": "1",
+        "ymdList": ymd_json,
+        "optionNumList": "[]",
         "downloadFlag": "true",
         "rmkFlag": "0",
         "disconnectFlag": "0",
@@ -139,43 +142,60 @@ def download_jma_data():
         "kijiFlag": "0",
         "csvFlag": "1",
         "jikantaiFlag": "0",
-        "jikantaiList": '[1,24]',
+        "jikantaiList": "[1,24]",
         "ymdLiteral": "1"
+    }
+
+    # sec-fetch-user: ?1 が必須。これがないとCloudFront WAFにブロックされる。
+    headers_post = {
+        "User-Agent": browser_ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Cache-Control": "max-age=0",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": "https://www.data.jma.go.jp",
+        "Referer": url_init,
+        "sec-ch-ua": sec_ch_ua,
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-user": "?1",
+        "dnt": "1",
+        "priority": "u=0, i",
+        "upgrade-insecure-requests": "1",
     }
 
     logger.info("CSVデータをリクエストしています...")
     try:
-        response = session.post(url_download, data=payload, headers=headers, timeout=20)
+        response = session.post(url_download, data=payload, headers=headers_post, timeout=30)
     except requests.exceptions.RequestException as e:
-        logger.error(f"データのダウンロードリクエストに失敗しました: {e}")
+        logger.error(f"ダウンロードリクエストに失敗しました: {e}")
         return [False, ""]
-    
-    today = datetime.now().strftime('%Y%m%d%H%M%S')
 
     save_dir = "temp"
     os.makedirs(save_dir, exist_ok=True)
+    today = datetime.now().strftime('%Y%m%d%H%M%S')
 
-    # レスポンスのチェック
     status_code = response.status_code
     content_type = response.headers.get("Content-Type", "")
-    # 成功失敗の判定はContent-Typeがtext/htmlかどうかで判定
-    [is_success, ext] = [False, "html"] if "text/html" in content_type else [True, "csv"]
-    
+    is_success = "text/html" not in content_type
+
     if is_success:
-        logger.info("リクエスト成功")
-        filepath = os.path.join(save_dir, f"pw_{today}.{ext}")
+        logger.info(f"リクエスト成功 (Status: {status_code}, CT: {content_type})")
+        filepath = os.path.join(save_dir, f"pw_{today}.csv")
     else:
-        logger.error("リクエスト失敗")
-        filepath = os.path.join(save_dir, f"pw_{today}_error.{ext}")
-    
-    logger.error(f"Status: {status_code}. Content-Type: {content_type}")
+        logger.error(f"リクエスト失敗 (Status: {status_code}, CT: {content_type})")
+        filepath = os.path.join(save_dir, f"pw_{today}_error.html")
 
     with open(filepath, "wb") as f:
         f.write(response.content)
-    logger.info(f"レスポンスを '{filepath}' に保存しました。")
-    
+    logger.info(f"レスポンスを '{filepath}' に保存しました ({len(response.content)} bytes)")
+
     log_with_memory("--- 気象庁天気API取得完了 ---")
     return [is_success, filepath]
+
 
 def convert_response(filepath_raw):
     """
@@ -188,38 +208,39 @@ def convert_response(filepath_raw):
     Args:
         filepath_raw (str): ダウンロードした生CSVファイルのパス。
     """
-
     log_with_memory("--- CSV整形開始 ---")
-
     logger.info("レスポンスを使いやすい形に加工します。")
 
-
-    # CSV変換処理
     try:
         df = pd.read_csv(
             filepath_raw,
-            encoding='cp932', 
+            encoding='cp932',
             skiprows=[0, 1, 2, 4]
         )
 
+        # JMAのCSVは風速と風向を同じ列名（風速(m/s)）で出力するため、
+        # pandasが2つ目の重複列に「.1」を付ける（例: 風速(m/s).1）。
+        # この列は実際には風向データ（北北東 等）なので「風向」に修正する。
         cols = list(df.columns)
-        if len(cols) > 6:
-            cols[6] = '風向'
-            df.columns = cols
-            
+        for i, col in enumerate(cols):
+            if col.endswith('.1') and ('風速' in col or '風向' in col):
+                cols[i] = '風向'
+                break
+        df.columns = cols
+
         save_dir = "static"
         os.makedirs(save_dir, exist_ok=True)
 
         filepath_new = os.path.join(save_dir, "past_weather.csv")
         df.to_csv(filepath_new, index=False, encoding='utf-8')
-        
-        logger.info(f"CSVを整形し '{filepath_new}' に保存しました。")
 
+        logger.info(f"CSVを整形し '{filepath_new}' に保存しました。列: {list(df.columns)}")
         log_with_memory("--- CSV整形完了 ---")
-        
+
     except Exception as e:
         logger.error(f"PandasでのCSVパース中にエラーが発生しました: {e}")
-    
+
+
 def backup(filepath_raw):
     try:
         backup_dir = "backup"
@@ -230,9 +251,10 @@ def backup(filepath_raw):
         shutil.move(filepath_raw, filepath_bk)
 
         logger.info(f"{filepath_raw}を{filepath_bk}にバックアップしました。")
-        
+
     except Exception as e:
         logger.error(f"バックアップ中にエラーが発生しました: {e}")
+
 
 if __name__ == "__main__":
     [is_success, filepath] = download_jma_data()
