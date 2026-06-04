@@ -72,26 +72,31 @@ pip install ollama pychromecast
 > ⚠️ `.env` は `.gitignore` に含まれており、Gitにはコミットされません
 
 ```env
-LOGIN_ID=<監視サイトのログインID>
-LOGIN_PASSWORD=<監視サイトのパスワード>
-COORDINATES=<経度,緯度>          # Yahoo天気API用（例: 139.76719,35.68136）
-APP_ID=<Yahoo APIアプリケーションID>
+# KP-Net（遠隔モニタリングサービス）のログイン設定
+LOGIN_ID=<KP-NetへのログインID>
+LOGIN_PASSWORD=<KP-Netへのログインパスワード>
+
+# Yahoo!気象情報API関連
+COORDINATES=<観測地点の経度>,<観測地点の緯度>（例: 139.76719,35.68136）
+APP_ID=<Yahoo!のAPIキー>
+
+# 気象庁 週間予報API関連
 JMA_AREA_CODE0=<都道府県コード>  # 気象庁 週間予報API用（例: 130000=東京都）
 JMA_AREA_CODE1=<天気エリアコード> # 気象庁 天気情報エリア（例: 130010=東京地方(本州)）
 JMA_AREA_CODE2=<気温エリアコード> # 気象庁 気温情報エリア（例: 44132=東京）
-JMA_STATION_NUM=<観測所番号>     # 気象庁 過去の気象データ用（例: a1133=府中）
+JMA_STATION_NUM=<観測所番号>     # 気象庁 過去の気象データ用（例: s47662=東京）
 
 # Google Home / Cast デバイス
-GOOGLE_HOME_NAME=YourSpeakerName
-PC_IP=192.168.x.x
-SERVE_PORT=8765
+GOOGLE_HOME_NAME=<Google Homeのデバイス名（Homeアプリで確認）>
+PC_IP=<このPCのLAN内IPアドレス>
+SERVE_PORT=8765               # WAVファイル配信ポート（競合しなければ変更可）
 
 # VoiceVox
 VOICEVOX_URL=http://localhost:50021
-SPEAKER_ID=3
+SPEAKER_ID=3                  # VoiceVoxの話者ID（3はずんだもん）
 
 # Ollama（zundamon.modelfile から ollama create zundamon で作成）
-OLLAMA_MODEL=zundamon
+OLLAMA_MODEL=zundamon         # zundamon.modelfile から作成したカスタムモデル名
 OLLAMA_HOST=http://localhost:11434
 ```
 
@@ -225,6 +230,20 @@ crontab -e
 
 #### Windows（タスクスケジューラ）
 
+`setup_scheduler.ps1` を **管理者権限** で実行すると以下の3つのタスクが自動登録されます。
+
+```powershell
+# PowerShell を「管理者として実行」して実行
+cd D:\path\to\EPLogger
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\setup_scheduler.ps1
+
+# 登録確認
+Get-ScheduledTask -TaskName 'EPLogger-*' | Format-Table TaskName, State, NextRunTime
+```
+
+登録されるタスク:
+
 ```
 # scraper.py の設定
 プログラム: python
@@ -232,9 +251,15 @@ crontab -e
 開始:       D:\path\to\EPLogger
 トリガー:   30分ごとに繰り返し
 
-# report_summary.py の設定
+# get_past_weather.py の設定
 プログラム: python
 引数:       D:\path\to\EPLogger\get_past_weather.py
+開始:       D:\path\to\EPLogger
+トリガー:   毎日 0:00
+
+# report_summary.py の設定
+プログラム: python
+引数:       D:\path\to\EPLogger\report_summary.py
 開始:       D:\path\to\EPLogger
 トリガー:   毎日 7:00, 12:00, 17:00 （任意の時間に設定してあげてください）
 ```
@@ -289,17 +314,7 @@ ollama run zundamon "今の発電状況をまとめて"
 
 > キャラクター設定（一人称・語尾・口調）はすべて `zundamon.modelfile` の `SYSTEM` ブロックに記述されており、`report_summary.py` 側には口調を固定するコードはありません。モデルをビルドし直すだけで口調変更できます。
 
-#### `.env` に追加が必要な変数
-
-```env
-GOOGLE_HOME_NAME=<Google Homeのデバイス名（Homeアプリで確認）>
-PC_IP=<このPCのLAN内IPアドレス>
-SERVE_PORT=8765               # WAVファイル配信ポート（競合しなければ変更可）
-VOICEVOX_URL=http://localhost:50021
-SPEAKER_ID=3                  # VoiceVoxの話者ID
-OLLAMA_MODEL=zundamon         # zundamon.modelfile から作成したカスタムモデル名
-OLLAMA_HOST=http://localhost:11434
-```
+必要な環境変数はすべて「[3. 環境変数の設定](#3-環境変数の設定)」にまとめています。
 
 ## アーキテクチャ
 

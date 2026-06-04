@@ -1,11 +1,11 @@
 # ============================================================
-# EPLogger 自動実行タスク登録
+# EPLogger 自動実行タスク登録 （要管理者権限！EPLoggerフォルダにcdしてから実行すること！）
 # - scraper.py: 30分おき
 # - report_summary.py: 朝7時、正午、夕方17時の3回
 # - スリープ中はスキップ
 # ============================================================
 
-$ProjectDir = "D:\Users\ayebee\source\repos\EPLogger"
+$ProjectDir = $PSScriptRoot
 $PyExe = "py"
 $PyArg = "-3.12"
 
@@ -69,8 +69,28 @@ Register-ScheduledTask `
     -Force
 
 
+# ============================================================
+# タスク3: get_past_weather.py を1時間おきに実行
+# ============================================================
+$weatherAction = New-ScheduledTaskAction `
+    -Execute "cmd.exe" `
+    -Argument "/c $PyExe $PyArg get_past_weather.py >> logs\weather.log 2>&1" `
+    -WorkingDirectory $ProjectDir
+
+$weatherTrigger = New-ScheduledTaskTrigger -Daily -At 0:00am
+
+Register-ScheduledTask `
+    -TaskName "EPLogger-Weather" `
+    -Description "EPLogger 過去気象データ取得（1日1回 0時）" `
+    -Action $weatherAction `
+    -Trigger $weatherTrigger `
+    -Settings $commonSettings `
+    -Force
+
+
 Write-Host "`n登録完了！"
 Write-Host "  - EPLogger-Scraper: 30分おき"
 Write-Host "  - EPLogger-Report:  7:00, 12:00, 17:00"
+Write-Host "  - EPLogger-Weather: 毎日 0:00"
 Write-Host "`n確認コマンド:"
 Write-Host "  Get-ScheduledTask -TaskName 'EPLogger-*' | Format-Table TaskName, State, NextRunTime"
