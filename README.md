@@ -294,6 +294,72 @@ python report_summary.py
 | [VoiceVox](https://voicevox.hiroshiba.jp/) | テキスト音声合成（TTS） | ローカルで起動しておく（デフォルト: `localhost:50021`） |
 | Google Home / Castデバイス | 音声再生 | PCと同一LAN上に配置する |
 
+#### VoiceVoxの起動
+
+VoiceVox エンジンを Docker で起動します。CPU 版で十分です。
+
+```powershell
+docker run -d --name voicevox -p 50021:50021 --restart always voicevox/voicevox_engine:cpu-latest
+```
+
+オプションの意味：
+
+- `-d` : バックグラウンド実行
+- `--name voicevox` : コンテナ名
+- `-p 50021:50021` : ポート公開（ホスト側 50021 → コンテナ側 50021）
+- `--restart always` : PC 再起動後も自動起動
+- `voicevox/voicevox_engine:cpu-latest` : CPU 版イメージ（数GB、初回 DL に時間がかかります）
+
+> Docker Desktop（Windows / Mac）または Docker Engine（Linux）のインストールが前提です。
+
+#### 動作確認
+
+```powershell
+# バージョン確認（PowerShell）
+Invoke-RestMethod http://localhost:50021/version
+
+# 起動中コンテナ確認
+docker ps
+```
+
+バージョン文字列が返れば起動成功です。
+
+#### 運用コマンド
+
+```powershell
+# 停止
+docker stop voicevox
+
+# 起動（停止後の再開）
+docker start voicevox
+
+# ログ確認
+docker logs voicevox --tail 50
+
+# 削除（再構築したい時のみ）
+docker stop voicevox
+docker rm voicevox
+```
+
+#### 話者IDの確認
+
+`.env` の `SPEAKER_ID` で話者・スタイルを指定します。ずんだもんの主な話者IDは以下です。
+
+| SPEAKER_ID | スタイル |
+| ---------- | ------------------ |
+| 1          | ずんだもん（あまあま）   |
+| 3          | ずんだもん（ノーマル） |
+| 5          | ずんだもん（ツンツン）   |
+| 7          | ずんだもん（セクシー）   |
+| 22         | ずんだもん（ささやき） |
+| 38         | ずんだもん（ヒソヒソ） |
+
+ずんだもん以外の話者を使いたい場合は、以下のコマンドで利用可能な全話者の一覧を取得できます。
+
+```powershell
+Invoke-RestMethod http://localhost:50021/speakers | ConvertTo-Json -Depth 5
+```
+
 #### カスタムモデルの作成（ずんだもん）
 
 ベースモデル（`gemma3:4b`）を取得し、カスタムモデルをビルドします。
